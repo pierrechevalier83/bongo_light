@@ -226,10 +226,13 @@ const TAP: [[u8; ANIM_SIZE]; TAP_FRAMES] = [
     ],
 ];
 
-pub(super) fn get_frame(frame: &Frame) -> &'static [u8] {
+pub(super) fn get_frame(frame: &Frame) -> Vec<u8> {
     match *frame {
         Frame::Idle(index) => &IDLE[index],
         Frame::Prep => &PREP[0],
         Frame::Tap(index) => &TAP[index],
     }
+    .iter()
+    .cloned()
+    .collect()
 }
