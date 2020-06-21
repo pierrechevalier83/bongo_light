@@ -1,9 +1,11 @@
+use termion;
 mod fat_bongo;
 mod oled;
 
 const IDLE_FRAMES: usize = 5;
 const TAP_FRAMES: usize = 2;
-
+const NUM_COLS: usize = 128;
+const SLEEP_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 enum Frame {
     Idle(usize),
     Prep,
@@ -20,9 +22,17 @@ fn all_frames() -> Vec<Frame> {
 }
 
 fn main() {
-    let num_cols = 128;
-
-    for frame in all_frames().iter().map(|frame| fat_bongo::get_frame(frame)) {
-        println!("{}", oled::render(frame, num_cols));
+    for frame in all_frames()
+        .iter()
+        .map(|frame| fat_bongo::get_frame(frame))
+        .cycle()
+    {
+        print!(
+            "{}{}{}",
+            termion::clear::All,
+            termion::cursor::Goto(1, 1),
+            oled::render(frame, NUM_COLS)
+        );
+        std::thread::sleep(SLEEP_INTERVAL);
     }
 }
