@@ -222,6 +222,8 @@ impl CompressedAnimation {
 
 impl std::fmt::Display for CompressedAnimation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "#### Rust ####")?;
+        writeln!(f, "```")?;
         writeln!(
             f,
             "const BASE_FRAME: [u8; {}] = {:?};",
@@ -245,6 +247,33 @@ impl std::fmt::Display for CompressedAnimation {
                 frame.diff.compressed
             )?;
         }
+        writeln!(f, "```")?;
+        writeln!(f, "#### C ####")?;
+        writeln!(f, "```")?;
+        writeln!(
+            f,
+            "static const char PROGMEM base_frame[{}] = {{{:?}}};",
+            self.original.compressed.len(),
+            self.original.compressed
+        )?;
+        writeln!(f, "")?;
+        for (index, frame) in self.all_frames.iter().enumerate() {
+            writeln!(
+                f,
+                "static const uint16_t PROGMEM regions_{}[{}] = {{{:?}}};",
+                index,
+                frame.differing_regions.len() * 2,
+                frame.differing_regions
+            )?;
+            writeln!(
+                f,
+                "static const char PROGMEM diff_{}[{}] = {{{:?}}};",
+                index,
+                frame.diff.compressed.len(),
+                frame.diff.compressed
+            )?;
+        }
+        writeln!(f, "```")?;
         let mut size: usize = self.original.compressed.len();
         size += self
             .all_frames
