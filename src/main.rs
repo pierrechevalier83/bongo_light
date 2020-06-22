@@ -43,6 +43,12 @@ fn main() {
         .collect::<Vec<_>>();
 
     let slim = compression::compress_frames(&fat_frames);
-    println!("{}", slim);
+    print!(
+        "{}{}{}",
+        termion::clear::All,
+        termion::cursor::Goto(1, 1),
+        slim
+    );
+    std::thread::sleep(std::time::Duration::from_secs(1));
     display_bongo(&slim_bongo::get_frame);
 }
