@@ -122,6 +122,10 @@ impl CompactAnimation {
     }
 }
 
+fn as_c_array_string<T: std::fmt::Debug>(v: &Vec<T>) -> String {
+    format!("{:?}", v).replace("[", "{").replace("]", "}")
+}
+
 impl std::fmt::Display for CompactAnimation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "#### Rust ####")?;
@@ -154,25 +158,30 @@ impl std::fmt::Display for CompactAnimation {
         writeln!(f, "```")?;
         writeln!(
             f,
-            "static const char PROGMEM base_frame[{}] = {{{:?}}};",
+            "static const char PROGMEM base_frame[{}] = {};",
             self.original.len(),
-            self.original
+            as_c_array_string(&self.original)
         )?;
         writeln!(f, "")?;
         for (index, frame) in self.all_frames.iter().enumerate() {
             writeln!(
                 f,
-                "static const uint16_t PROGMEM regions_{}[{}] = {{{:?}}};",
+                "#define REGIONS_LEN_{} {}",
                 index,
                 frame.differing_regions.len() * 2,
-                frame.differing_regions
             )?;
             writeln!(
                 f,
-                "static const char PROGMEM diff_{}[{}] = {{{:?}}};",
+                "static const uint16_t PROGMEM regions_{}[REGIONS_LEN_{}] = {};",
                 index,
-                frame.diff.len(),
-                frame.diff
+                index,
+                as_c_array_string(&frame.differing_regions)
+            )?;
+            writeln!(f, "#define DIFF_LEN_{} {}", index, frame.diff.len(),)?;
+            writeln!(
+                f,
+                "static const char PROGMEM diff_{}[DIFF_LEN_{}] = {};",
+                index, index, as_c_array_string(&frame.diff)
             )?;
         }
         writeln!(f, "```")?;
