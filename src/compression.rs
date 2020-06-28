@@ -101,96 +101,188 @@ impl Diff {
         }
         false
     }
+    fn flattened_regions(&self) -> Vec<usize> {
+        self.differing_regions
+            .iter()
+            .flat_map(|region| std::iter::once(region.begin).chain(std::iter::once(region.end)))
+            .collect()
+    }
 }
 
 pub(super) struct CompactAnimation {
-    original: Vec<u8>,
+    frame_len: usize,
+    original: Diff,
     all_frames: Vec<Diff>,
 }
 
 impl CompactAnimation {
+    pub fn construct_empty_frame(frame_len: usize) -> Vec<u8> {
+        (0..frame_len).map(|_| 0).collect()
+    }
+    fn original_frame(&self) -> Vec<u8> {
+        self.original
+            .reconstruct_frame(&Self::construct_empty_frame(self.frame_len))
+    }
     fn from_original(original: &[u8]) -> Self {
+        // Store original as a diff to an empty screen to save a few bytes
+        let frame_len = original.len();
+        let original =
+            Diff::from_original_and_altered(&Self::construct_empty_frame(frame_len), original);
         Self {
-            original: original.iter().cloned().collect(),
+            frame_len,
+            original,
             all_frames: Vec::new(),
         }
     }
     fn with_frame(mut self, other_frame: &[u8]) -> Self {
-        let diff = Diff::from_original_and_altered(&self.original, other_frame);
+        let diff = Diff::from_original_and_altered(&self.original_frame(), other_frame);
         self.all_frames.push(diff);
         self
     }
+    fn differing_regions_boundaries(&self) -> Vec<usize> {
+        let mut index: usize = 0;
+        std::iter::once({
+            index += self.original.flattened_regions().len();
+            index
+        })
+        .chain(self.all_frames.iter().map(|frame| {
+            index += frame.flattened_regions().len();
+            index
+        }))
+        .collect()
+    }
+    fn differing_regions(&self) -> Vec<usize> {
+        self.original
+            .flattened_regions()
+            .iter()
+            .cloned()
+            .chain(
+                self.all_frames
+                    .iter()
+                    .flat_map(|frame| frame.flattened_regions().into_iter()),
+            )
+            .collect()
+    }
+    fn differing_bytes_boundaries(&self) -> Vec<usize> {
+        let mut index: usize = 0;
+        std::iter::once({
+            index += self.original.diff.len();
+            index
+        })
+        .chain(self.all_frames.iter().map(|frame| {
+            index += frame.diff.len();
+            index
+        }))
+        .collect()
+    }
+    fn differing_bytes(&self) -> Vec<u8> {
+        self.original
+            .diff
+            .iter()
+            .cloned()
+            .chain(
+                self.all_frames
+                    .iter()
+                    .flat_map(|frame| frame.diff.iter().cloned()),
+            )
+            .collect()
+    }
 }
 
-fn as_c_array_string<T: std::fmt::Debug>(v: &Vec<T>) -> String {
+fn as_c_array_string<T: std::fmt::Debug>(v: &[T]) -> String {
     format!("{:?}", v).replace("[", "{").replace("]", "}")
+}
+
+fn fmt_as_rust_array<T: std::fmt::Debug>(name: &str, rust_type: &str, array: &[T]) -> String {
+    format!(
+        "const {}: [{}; {}] = {:?};",
+        name,
+        rust_type,
+        array.len(),
+        array,
+    )
+}
+
+fn fmt_as_c_array<T: std::fmt::Debug>(name: &str, c_type: &str, array: &[T]) -> String {
+    format!(
+        "static const {} PROGMEM {}[{}] = {};",
+        c_type,
+        name,
+        array.len(),
+        as_c_array_string(array),
+    )
 }
 
 impl std::fmt::Display for CompactAnimation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "#### Rust ####")?;
         writeln!(f, "```")?;
+        writeln!(f, "const FRAME_SIZE: usize = {};", self.frame_len)?;
         writeln!(
             f,
-            "const BASE_FRAME: [u8; {}] = {:?};",
-            self.original.len(),
-            self.original
+            "{}",
+            fmt_as_rust_array(
+                "DIFF_REGIONS_BOUNDARIES",
+                "usize",
+                &self.differing_regions_boundaries()
+            )
         )?;
-        writeln!(f, "")?;
-        for (index, frame) in self.all_frames.iter().enumerate() {
-            writeln!(
-                f,
-                "const REGIONS_{}: [usize; {}] = {:?};",
-                index,
-                frame.differing_regions.len() * 2,
-                frame.differing_regions
-            )?;
-            writeln!(
-                f,
-                "const DIFF_{}: [u8; {}] = {:?};",
-                index,
-                frame.diff.len(),
-                frame.diff
-            )?;
-        }
+        writeln!(
+            f,
+            "{}",
+            fmt_as_rust_array("DIFF_REGIONS", "usize", &self.differing_regions())
+        )?;
+        writeln!(
+            f,
+            "{}",
+            fmt_as_rust_array(
+                "DIFF_BYTES_BOUNDARIES",
+                "usize",
+                &self.differing_bytes_boundaries()
+            )
+        )?;
+        writeln!(
+            f,
+            "{}",
+            fmt_as_rust_array("DIFF_BYTES", "u8", &self.differing_bytes())
+        )?;
         writeln!(f, "```")?;
         writeln!(f, "#### C ####")?;
         writeln!(f, "```")?;
+        writeln!(f, "#define FRAME_SIZE {}", self.frame_len)?;
         writeln!(
             f,
-            "static const char PROGMEM base_frame[{}] = {};",
-            self.original.len(),
-            as_c_array_string(&self.original)
+            "{}",
+            fmt_as_c_array(
+                "diff_regions_boundaries",
+                "uint16_t",
+                &self.differing_regions_boundaries()
+            )
         )?;
-        writeln!(f, "")?;
-        for (index, frame) in self.all_frames.iter().enumerate() {
-            writeln!(
-                f,
-                "#define REGIONS_LEN_{} {}",
-                index,
-                frame.differing_regions.len() * 2,
-            )?;
-            writeln!(
-                f,
-                "static const uint16_t PROGMEM regions_{}[REGIONS_LEN_{}] = {};",
-                index,
-                index,
-                as_c_array_string(&frame.differing_regions)
-            )?;
-            writeln!(f, "#define DIFF_LEN_{} {}", index, frame.diff.len(),)?;
-            writeln!(
-                f,
-                "static const char PROGMEM diff_{}[DIFF_LEN_{}] = {};",
-                index, index, as_c_array_string(&frame.diff)
-            )?;
-        }
+        writeln!(
+            f,
+            "{}",
+            fmt_as_c_array("diff_regions", "uint16_t", &self.differing_regions())
+        )?;
+        writeln!(
+            f,
+            "{}",
+            fmt_as_c_array(
+                "diff_bytes_boundaries",
+                "uint16_t",
+                &self.differing_bytes_boundaries()
+            )
+        )?;
+        writeln!(
+            f,
+            "{}",
+            fmt_as_c_array("diff_bytes", "char", &self.differing_bytes())
+        )?;
         writeln!(f, "```")?;
-        let mut size: usize = self.original.len();
-        size += self
-            .all_frames
-            .iter()
-            .map(|frame| frame.diff.len() + 4 * frame.differing_regions.len())
-            .sum::<usize>();
+        let size = self.differing_bytes().len()
+            + 2 * (self.differing_bytes_boundaries().len()
+                + self.differing_regions().len()
+                + self.differing_regions_boundaries().len());
         writeln!(f, "Total size in bytes: {}", size)
     }
 }
